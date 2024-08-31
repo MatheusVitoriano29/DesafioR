@@ -1,0 +1,140 @@
+# type: ignore
+from pathlib import Path
+from time import sleep
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.wait import WebDriverWait
+from bs4 import BeautifulSoup
+
+# Caminho para a raiz do projeto
+ROOT_FOLDER = Path(__file__).parent
+# Caminho para a pasta onde o chromedriver está
+CHROME_DRIVER_PATH = ROOT_FOLDER / 'driverevio' / 'chromedriver.exe'
+
+# Tempo para esperar elementos
+TIME_TO_WAIT = 15
+
+def make_chrome_browser(*options: str) -> webdriver.Chrome:
+    chrome_options = Options()
+
+    # Adicionar opções conforme necessário
+    if options:
+        for option in options:
+            chrome_options.add_argument(option)
+
+    chrome_service = Service(
+        executable_path=str(CHROME_DRIVER_PATH),
+    )
+
+    browser = webdriver.Chrome(
+        service=chrome_service,
+        options=chrome_options
+    )
+
+    # Maximizar a janela do navegador
+    browser.maximize_window()
+
+    return browser
+
+def scroll_to_bottom(browser):
+    """Rola a página para baixo até o final."""
+    last_height = browser.execute_script("return document.body.scrollHeight")
+
+    while True:
+        # Rolar para o fundo da página
+        browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        sleep(5)  # Esperar o conteúdo carregar
+
+        # Verificar a nova altura da página
+        new_height = browser.execute_script("return document.body.scrollHeight")
+        if new_height == last_height:
+            # Se a altura não mudou, significa que estamos no final da página
+            break
+        last_height = new_height
+
+def click_load_more_until_no_more(browser):
+    """Continua rolando e clicando no botão 'VER MAIS' até que ele não esteja mais disponível."""
+    while True:
+        scroll_to_bottom(browser)  # Rola para o fundo da página antes de procurar o botão
+
+        # Esperar mais 5 segundos para garantir que o conteúdo tenha sido carregado
+        sleep(5)
+
+        try:
+            # Localize e clique no botão 'VER MAIS'
+            load_more_button = WebDriverWait(browser, TIME_TO_WAIT).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="loadMore"]'))
+            )
+            load_more_button.click()
+            print("Clicou no botão 'VER MAIS'")
+            sleep(10)  # Aguarde um pouco após clicar no botão
+        except Exception as e:
+            print(f"Não encontrou o botão 'VER MAIS' ou erro: {e}")
+            break  # Interrompe o loop se não encontrar o botão
+
+def extract_and_save_news_info(browser):
+    # Navegue para a página principal
+    browser.get('https://www.omelete.com.br/')
+
+    # Aguarde até que o elemento esteja disponível e clique nele
+    element_to_click = WebDriverWait(browser, TIME_TO_WAIT).until(
+        EC.element_to_be_clickable((By.XPATH, '/html/body/header/div[2]/div[1]/div/div[4]/div[1]'))
+    )
+    element_to_click.click()
+
+    # Aguarde um pouco após o clique
+    sleep(5)
+
+    # Localize o campo de pesquisa e envie o texto
+    search_input = WebDriverWait(browser, TIME_TO_WAIT).until(
+        EC.presence_of_element_located((By.NAME, 'q'))  # Substitua 'q' pelo nome correto do campo de pesquisa
+    )
+    search_input.send_keys('Deadpool')
+    search_input.send_keys(Keys.RETURN)  # Envie o formulário
+
+    # Aguarde um pouco para ver o resultado
+    sleep(5)
+
+    # Rolar a página e clicar em 'VER MAIS' até que não haja mais notícias
+    click_load_more_until_no_more(browser)
+
+    # Obtenha o conteúdo da página
+    page_source = browser.page_source
+
+    # Parse o conteúdo da página com BeautifulSoup
+    soup = BeautifulSoup(page_source, 'html.parser')
+
+    # Ajuste o seletor conforme necessário para encontrar notícias
+    news_items = soup.find_all('article', class_='featured')
+
+    news_info = []
+    for item in news_items:
+        try:
+            # Extrair título e data
+            title = item.find('h2').text.strip() if item.find('h2') else 'Título não encontrado'
+            date = item.find('div', class_='mark__time').text.strip() if item.find('div', class_='mark__time') else 'Data não encontrada'
+
+            # Adicionar informação à lista
+            news_info.append(f'Título: {title}\nData: {date}')
+        except Exception as e:
+            print(f"Erro ao extrair notícia: {e}")
+
+    # Salvar títulos e datas em um arquivo de texto
+    file_path = ROOT_FOLDER / 'deadpool.txt'
+    with open(file_path, 'w', encoding='utf-8') as file:
+        file.write('\n\n'.join(news_info))
+
+if __name__ == '__main__':
+    # Exemplo de opções
+    options = ()
+    browser = make_chrome_browser(*options)
+
+    try:
+        extract_and_save_news_info(browser)
+    finally:
+        # Feche o navegador
+        browser.quit()
